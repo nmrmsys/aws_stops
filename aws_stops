@@ -1,0 +1,168 @@
+#!/bin/sh
+
+# Constant definition
+PROGNAME=$(basename $0)
+VERSION="0.1.0"
+PRIORITY="local0.info"
+
+# Main procedure
+Main(){
+  # Initial setting
+  HHMM=`date '+%H:%M'`
+  
+  OutputMessage "Setting Target Time: $HHMM"
+  OutputMessage "Setting AWS CLI profile: $PROF"
+
+  # Stop EC2 target instance loop 
+  aws $PROF_OPT ec2 describe-instances --filters "Name=tag:Stop, Values=$HHMM" --query "sort_by(Reservations[].Instances[], &PrivateIpAddress)" \
+    | jq -r '.[] | [ .InstanceId, (.Tags[]? | select(.Key == "Name")).Value ] | @tsv' \
+    | while read line_inst
+  do
+    StopEC2 $line_inst
+  done
+
+  # Start EC2 target instance loop 
+  aws $PROF_OPT ec2 describe-instances --filters "Name=tag:Start, Values=$HHMM" --query "sort_by(Reservations[].Instances[], &PrivateIpAddress)" \
+    | jq -r '.[] | [ .InstanceId, (.Tags[]? | select(.Key == "Name")).Value ] | @tsv' \
+    | while read line_inst
+  do
+    StartEC2 $line_inst
+  done
+
+  # Stop RDS target instance loop 
+  aws $PROF_OPT rds describe-db-instances --query "sort_by(DBInstances[], &DBInstanceIdentifier)" \
+    | jq -r '.[] | [ .DBInstanceIdentifier, .DBInstanceArn ] | @tsv' \
+    | while read line_inst
+  do
+    StopRDS $line_inst
+  done
+
+  # Start RDS target instance loop 
+  aws $PROF_OPT rds describe-db-instances --query "sort_by(DBInstances[], &DBInstanceIdentifier)" \
+    | jq -r '.[] | [ .DBInstanceIdentifier, .DBInstanceArn ] | @tsv' \
+    | while read line_inst
+  do
+    StartRDS $line_inst
+  done
+  
+  OutputMessage "Stop/Start Finished"
+}
+
+# Function definition
+Usage(){
+cat <<EOF
+$PROGNAME - AWS EC2/RDS Instance Stop/Start Tool version $VERSION
+Usage: $PROGNAME --profile <prof> [--dry-run]
+      $PROGNAME --profile prof1
+EOF
+}
+
+StopEC2(){
+  inst_id=$1
+  inst_nm=$2
+  OutputMessage "Stop EC2 $inst_id $inst_nm $name"
+  if [ -n "$DRY_RUN" ]; then
+    return
+  fi
+  aws $PROF_OPT ec2 stop-instances --instance-ids $inst_id > /dev/null
+}
+
+StartEC2(){
+  inst_id=$1
+  inst_nm=$2
+  OutputMessage "Start EC2 $inst_id $inst_nm"
+  if [ -n "$DRY_RUN" ]; then
+    return
+  fi
+  aws $PROF_OPT ec2 start-instances --instance-ids $inst_id > /dev/null
+}
+
+StopRDS(){
+  inst_id=$1
+  inst_arn=$2
+  rds_hm=$(aws $PROF_OPT rds list-tags-for-resource --resource-name $inst_arn | jq -r '[(.TagList[]? | select(.Key == "Stop")).Value] | @tsv')
+  if [ "$rds_hm" == "$HHMM" ]; then
+    OutputMessage "Stop RDS $inst_id"
+    if [ -n "$DRY_RUN" ]; then
+      return
+    fi
+    aws $PROF_OPT rds stop-db-instance --db-instance-identifier $inst_id > /dev/null
+  fi
+}
+
+StartRDS(){
+  inst_id=$1
+  inst_arn=$2
+  rds_hm=$(aws $PROF_OPT rds list-tags-for-resource --resource-name $inst_arn | jq -r '[(.TagList[]? | select(.Key == "Start")).Value] | @tsv')
+  if [ "$rds_hm" == "$HHMM" ]; then
+    OutputMessage "Start RDS $inst_id"
+    if [ -n "$DRY_RUN" ]; then
+      return
+    fi
+    aws $PROF_OPT rds start-db-instance --db-instance-identifier $inst_id > /dev/null
+  fi
+}
+
+OutputMessage(){
+  msg=$1
+  echo $msg
+  echo $msg | logger -p $PRIORITY -t $PROGNAME
+}
+
+# getopt
+for OPT in "$@"; do
+  case "$OPT" in
+    '-h'|'--help' )
+      Usage
+      exit 1
+      ;;
+    '--version' )
+      echo $VERSION
+      exit 1
+      ;;
+    '--profile' )
+      if [[ -z "$2" ]] || [[ "$2" =~ ^-+ ]]; then
+        echo "$PROGNAME: option requires an argument -- $1" 1>&2
+        exit 1
+      fi
+      PROF="$2"
+      PROF_OPT="--profile $2"
+      shift 2
+      ;;
+    '--dry-run' )
+      DRY_RUN="TRUE"
+      shift 1
+      ;;
+    '--'|'-' )
+      shift 1
+      PRAMS+=( "$@" )
+      break
+      ;;
+    -*)
+      echo "$PROGNAME: illegal option -- '$(echo $1 | sed 's/^-*//')'" 1>&2
+      exit 1
+      ;;
+    *)
+      if [[ ! -z "$1" ]] && [[ ! "$1" =~ ^-+ ]]; then
+        #PRAMS=( ${PRAMS[@]} "$1" )
+        PRAMS+=( "$1" )
+        shift 1
+      fi
+      ;;
+  esac
+done
+
+# no required argument
+if [ "$PROF" == "" ]; then
+  Usage
+  exit 1
+fi
+
+#if [ -z $PRAMS ]; then
+#  echo "$PROGNAME: too few arguments" 1>&2
+#  echo "Try '$PROGNAME --help' for more information." 1>&2
+#  exit 1
+#fi
+
+# call main
+Main
