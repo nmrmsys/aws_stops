@@ -2,7 +2,7 @@ aws_stops - AWS EC2/RDS Instance Stop/Start Tool
 ====
 
 ## Usage
- aws_stops --profile &lt;prof&gt; [--dry-run]
+ aws_stops --profile &lt;prof&gt; [--dry-run &lt;target_time&gt;]
 
     > # Setting Stop/Start Instance Tag 
     > # Stop: 22:00, Start: 08:00 

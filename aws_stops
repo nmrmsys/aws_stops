@@ -8,7 +8,7 @@ PRIORITY="local0.info"
 # Main procedure
 Main(){
   # Initial setting
-  HHMM=`date '+%H:%M'`
+  HHMM=${TARGET_TIME:-`date '+%H:%M'`}
   
   OutputMessage "Setting Target Time: $HHMM"
   OutputMessage "Setting AWS CLI profile: $PROF"
@@ -52,7 +52,7 @@ Main(){
 Usage(){
 cat <<EOF
 $PROGNAME - AWS EC2/RDS Instance Stop/Start Tool version $VERSION
-Usage: $PROGNAME --profile <prof> [--dry-run]
+Usage: $PROGNAME --profile <prof> [--dry-run <target_time>]
       $PROGNAME --profile prof1
 EOF
 }
@@ -106,6 +106,9 @@ StartRDS(){
 OutputMessage(){
   msg=$1
   echo $msg
+  if [ -n "$DRY_RUN" ]; then
+    return
+  fi
   echo $msg | logger -p $PRIORITY -t $PROGNAME
 }
 
@@ -130,8 +133,13 @@ for OPT in "$@"; do
       shift 2
       ;;
     '--dry-run' )
+      if [[ -z "$2" ]] || [[ "$2" =~ ^-+ ]]; then
+        echo "$PROGNAME: option requires an argument -- $1" 1>&2
+        exit 1
+      fi
       DRY_RUN="TRUE"
-      shift 1
+      TARGET_TIME="$2"
+      shift 2
       ;;
     '--'|'-' )
       shift 1
